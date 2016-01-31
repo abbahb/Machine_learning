@@ -1,0 +1,159 @@
+---
+title: "Machine Learning Prediction Assignment"
+output: html_document
+---
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, The goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and  were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).   
+
+Data  
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+What you should submit
+
+The goal of project is to predict the manner in which we did the exercise. This is the "classe" variable in the training set and  use any of the other variables to predict with. We  create a report describing how we built the model,  used cross validation,  the expected out of sample error is, and why the choices we did. We use your prediction model to predict 20 different test cases.  
+
+# load related libraries and data processing. 
+
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(randomForest)
+library(rattle)
+library(ggplot2)
+```  
+# Download both training and testing datasets.
+* Both files in CV format.  
+```{r,echo=TRUE}
+setwd("C:/ARCHIVE/DATA_SCIENTIST/MODULE8_MACHINE_LEARNING/Assignment")
+training_URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing_URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training_file <- "./data/pml-training.csv"
+testing_file <- "./data/pml-testing.csv"
+# check if files exists
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(training_file)) {
+  download.file(training_URL, training_file)
+}
+if (!file.exists(testing_file)) {
+  download.file(testing_URL, testing_file)
+}
+dir()
+```  
+# Data Processing    
+* Read csv files & remove missing value i.e 'NA' , '#DIV/01' and spaces.  
+```{r,echo=TRUE}
+training_data <- read.csv(training_file,header = TRUE,sep=",",na.strings=c("NA","#DIV/0!",""))
+testing_data <- read.csv(testing_file,header = TRUE,sep=",",na.strings=c("NA","#DIV/0!",""))
+dim(training_data)
+dim(testing_data)
+```
+
+* Output from ** dim() ** on training dataset contains `r dim(training_data)[1]` observations and `r dim(training_data)[2]` variables.  
+* Output from ** dim() ** on testing dataset contains `r dim(testing_data)[1]` observations and `r dim(testing_data)[2]` variables.   
+
+# Exploratory Data Analysis.   
+Remove columns contain  missing value i.e NA  and some variables less contribute to accelerometer measurements.
+
+```{r,echo=TRUE}
+training_data <- training_data[, colSums(is.na(training_data)) == 0] 
+testing_data <- testing_data[, colSums(is.na(testing_data)) == 0]
+classe <- training_data$classe
+remove_train_var <- grepl("^X|timestamp|window", names(training_data))
+training_data <- training_data[, !remove_train_var]
+training_ds <- training_data[, sapply(training_data, is.numeric)]
+training_ds$classe <- classe
+remove_test_var <- grepl("^X|timestamp|window", names(testing_data))
+testing_data <- testing_data[, !remove_test_var]
+testing_ds <- testing_data[, sapply(testing_data, is.numeric)]
+```  
+# Partition the data.  
+We split (spliting the data based on the outcome) cleaned training data set to 60% as a training dataset 40% for validation dataset with list=F to avoid data return as a list and  perform cross validation on this dataset (validation dataset) later.   
+```{r,echo=TRUE}
+set.seed(51255) # For reproducibile result
+inTrain <- createDataPartition(training_ds$classe, p=0.60, list=F)
+trainData <- training_ds[inTrain, ]
+testData <-  training_ds[-inTrain, ]
+dim(trainData)
+dim(testData)
+```  
+* After cleansed the training dataset , it contains `r dim(trainData)[1]` observations and `r dim(trainData)[2]` variables.  
+* After cleansed testing dataset , it contains `r dim(testData)[1]` observations and `r dim(testData)[2]` variables.  
+
+# Plot the training data using feature plot.     
+```{r,echo=TRUE}
+# plot features
+total <- which(grepl("^total", colnames(trainData), ignore.case = F))
+totalAccel <- trainData[, total]
+featurePlot(x = totalAccel, y = trainData$classe, pch = 19, main = "Feature plot", 
+    plot = "pairs")
+``` 
+
+# Model building , tuning  and Measuring the performamce.  
+
+* We use k-fold Cross Validation to estimate the accuracy of the model performance on validation data which method involves splitting the dataset into k-subsets .  
+We choose this mothod becasue it is a robust method for estimating accuracy, and the size of k and tune the amount of bias in the estimate, we use 5 fold cross validation when apply the algorithm i.e method is Random forest.    
+
+```{r,echo=TRUE}
+train_cnt <- trainControl(method="cv", number=5)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=train_cnt,ntree=250)
+modelRf$finalModel
+## Save the train model
+## To check the variable importance in Model built and plot to visual the result
+varimp_model <- varImp(modelRf,scale=FALSE)
+plot(varimp_model)
+save(modelRf, file="modelRf.RData")
+```
+Then, we make predicition on fitting model based on the validation data set and summarized the result of classification by using **confusionMatrix()** function.   
+
+```{r,echo=TRUE}
+## load training model
+load(file="modelRf.RData", verbose=TRUE)
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+out_of_sam_error <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+out_of_sam_error
+```  
+So, the estimated accuracy of the model is **`r accuracy[1]*100 `%** and the estimated out-of-sample error is **`r out_of_sam_error*100`%**.   
+
+#Predicting for Test Data Set.    
+Now, we apply the model to the original testing data set downloaded from the data source. We remove the problem_id column first.   
+```{r,echo=TRUE}
+result.predict <- predict(modelRf, testing_ds[, -length(names(testing_ds))])
+summary(result.predict)
+result.predict
+```  
+#Result & write the predicted value to text file
+```{r,echo=TRUE}
+print(modelRf, digits = 3)
+# plot the random forest model
+plot(modelRf, log = "y", lwd = 2, main = "Random forest accuracy", xlab = "Predictors",ylab = "Accuracy")  
+# write to file
+pml_write_files = function(x) {
+    n = length(x)
+    for (i in 1:n) {
+        filename = paste0("problem_id_", i, ".txt")
+        write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, 
+            col.names = FALSE)
+    }
+}
+pml_write_files(result.predict)
+```
+
+
